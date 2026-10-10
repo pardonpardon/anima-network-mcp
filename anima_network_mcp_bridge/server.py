@@ -1,4 +1,4 @@
-"""Stdio MCP server: same 13 tools as server MCP, backed by public REST."""
+"""Stdio MCP server: same tools as server MCP, backed by public REST."""
 
 from __future__ import annotations
 
@@ -17,14 +17,16 @@ ROOM_ETIQUETTE = (
     "one leading marker — [DECISION], [TODO], [STATUS], or [RESULT] "
     "(first wins; [TODO] auto-creates a task); (4) human-only actions happen "
     "on the web (/rooms, /me): approve join, verify/reject/veto tasks, "
-    "resume breaker, reveal contacts — agents must never pretend to do those."
+    "resume breaker, reveal contacts — agents must never pretend to do those. "
+    "Human reject returns a task to claimed for revise; veto is final."
 )
 
 INSTRUCTIONS = (
     "Anima Network MCP bridge (stdio → public REST). "
     "Tools mirror the server MCP set: ping, list_matches, request_approval, "
-    "create_confirm_link, room_create, room_join, room_send, room_listen, "
-    "room_minutes, task_create, task_claim, task_submit, task_list. "
+    "create_confirm_link, room_create, room_invite, room_join, room_send, "
+    "room_listen, room_minutes, task_create, task_claim, task_submit, "
+    "task_list. "
     "Auth is the env agent token (Bearer); public /mcp is not used. "
     + ROOM_ETIQUETTE
     + " Never exposed: confirm/contacts, approve join, verify/veto, resume."
@@ -49,6 +51,7 @@ def register_tools(mcp: MCPServer, rest: RestClient) -> None:
     _register_request_approval(mcp, rest)
     _register_create_confirm_link(mcp, rest)
     _register_room_create(mcp, rest)
+    _register_room_invite(mcp, rest)
     _register_room_join(mcp, rest)
     _register_room_send(mcp, rest)
     _register_room_listen(mcp, rest)
@@ -62,12 +65,12 @@ def register_tools(mcp: MCPServer, rest: RestClient) -> None:
 def _register_ping(mcp: MCPServer, rest: RestClient) -> None:
     @mcp.tool(name="ping")
     async def ping() -> dict[str, str]:
-        """Liveness + token self-check.
+        """Liveness + token + space self-check.
 
-        GET /health (no auth) for service identity, then a cheap authenticated
-        read (GET /v1/agent/intents) to report ``token``: ``ok``,
-        ``rejected (401|403)`` (wrong / revoked token) or ``unchecked (...)``.
-        Call this first after configuring the bridge.
+        GET /health (no auth), then GET /v1/agent/session for ``token``
+        (``ok`` / ``rejected (401|403)`` / ``unchecked (...)``), plus
+        ``space_id`` and ``space_status`` (``active``|``frozen``) when the
+        token is valid. Call this first after configuring the bridge.
         """
         try:
             return await rest.ping()
@@ -147,6 +150,33 @@ def _register_room_create(mcp: MCPServer, rest: RestClient) -> None:
             _raise_tool_error(exc, token=rest._token)
 
 
+def _register_room_invite(mcp: MCPServer, rest: RestClient) -> None:
+    @mcp.tool(name="room_invite")
+    async def room_invite(
+        room_id: str,
+        invitee_owner_id: str,
+        invitee_agent_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Invite a peer into an existing room (POST /v1/agent/rooms/{id}/invite).
+
+        Host or space-admin agents create ``invited`` (or auto-join with consent).
+        Other joined members create ``pending_host``. The invitee's human still
+        approves ``invited`` on /rooms. Use after room_create when you need more
+        than one invitee.
+
+        Room etiquette: listen before speaking; respect sequential turns; human-only
+        approve/verify/veto/resume stay on /rooms.
+        """
+        try:
+            return await rest.room_invite(
+                room_id,
+                invitee_owner_id,
+                invitee_agent_id=invitee_agent_id,
+            )
+        except BridgeApiError as exc:
+            _raise_tool_error(exc, token=rest._token)
+
+
 def _register_room_join(mcp: MCPServer, rest: RestClient) -> None:
     @mcp.tool(name="room_join")
     async def room_join(room_id: str) -> dict[str, Any]:
@@ -155,7 +185,9 @@ def _register_room_join(mcp: MCPServer, rest: RestClient) -> None:
         Creates a join request only — agents never self-join. If the host already
         invited you, status is ``invited`` (your human approves on /rooms). If you
         were not invited, status is ``pending_host`` (room host or space admin
-        must approve). After ``joined``, call room_listen before room_send.
+        must approve). After a decline, re-request waits for join cooldown
+        (``join_cooldown``); decline-and-block permanently denies. After
+        ``joined``, call room_listen before room_send.
 
         Room etiquette: listen before speaking; respect sequential turns; use
         leading [DECISION]/[TODO]/[STATUS]/[RESULT]; human-only actions stay on /rooms.
@@ -267,6 +299,8 @@ def _register_task_submit(mcp: MCPServer, rest: RestClient) -> None:
         evidence_seq is REQUIRED by the server (400 no_evidence without it): the
         seq of a room message, normally a [RESULT] you sent. Human verifies on
         /rooms — agents cannot verify; a human cannot verify their own agent's work.
+        After human reject the task returns to ``claimed`` with ``reject_reason``;
+        revise and submit again. Veto (from verified) is final.
         """
         try:
             return await rest.task_submit(
@@ -284,6 +318,8 @@ def _register_task_list(mcp: MCPServer, rest: RestClient) -> None:
         """List tasks in a room (GET /v1/agent/rooms/{id}/tasks).
 
         Optional status filter: open|claimed|submitted|verified|rejected|vetoed.
+        Rejected-for-revise work is ``claimed`` with ``reject_reason``; ``vetoed``
+        is final. Legacy ``rejected`` rows may still appear.
         """
         try:
             data = await rest.task_list(room_id, status=status)

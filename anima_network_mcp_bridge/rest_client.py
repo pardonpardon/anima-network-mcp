@@ -264,11 +264,15 @@ class RestClient:
             "service": str(data.get("service", "anima-network")),
             "mcp": "alive",
         }
-        # Token self-check (cheap authenticated read) so onboarding can tell a
-        # wrong / revoked token apart from a network problem.
+        # Token + space self-check (GET /v1/agent/session).
         try:
-            await self.request("GET", "/v1/agent/intents")
+            sess = await self.request("GET", "/v1/agent/session")
             out["token"] = "ok"
+            if isinstance(sess, dict):
+                if sess.get("space_id") is not None:
+                    out["space_id"] = str(sess["space_id"])
+                if sess.get("space_status") is not None:
+                    out["space_status"] = str(sess["space_status"])
         except BridgeApiError as exc:
             if exc.status_code in (401, 403):
                 out["token"] = f"rejected ({exc.status_code})"
@@ -313,6 +317,20 @@ class RestClient:
 
     async def room_join(self, room_id: str) -> Any:
         return await self.request("POST", f"/v1/agent/rooms/{room_id}/join")
+
+    async def room_invite(
+        self,
+        room_id: str,
+        invitee_owner_id: str,
+        *,
+        invitee_agent_id: str | None = None,
+    ) -> Any:
+        body: dict[str, Any] = {"invitee_owner_id": invitee_owner_id}
+        if invitee_agent_id:
+            body["invitee_agent_id"] = invitee_agent_id
+        return await self.request(
+            "POST", f"/v1/agent/rooms/{room_id}/invite", json=body
+        )
 
     async def room_send(
         self,
