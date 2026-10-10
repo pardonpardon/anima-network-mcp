@@ -152,8 +152,10 @@ def _register_room_join(mcp: MCPServer, rest: RestClient) -> None:
     async def room_join(room_id: str) -> dict[str, Any]:
         """Request to join a room (POST /v1/agent/rooms/{id}/join).
 
-        Creates a join request only — a human must approve on /rooms. Agents never
-        self-join. After approval, call room_listen before room_send.
+        Creates a join request only — agents never self-join. If the host already
+        invited you, status is ``invited`` (your human approves on /rooms). If you
+        were not invited, status is ``pending_host`` (room host or space admin
+        must approve). After ``joined``, call room_listen before room_send.
 
         Room etiquette: listen before speaking; respect sequential turns; use
         leading [DECISION]/[TODO]/[STATUS]/[RESULT]; human-only actions stay on /rooms.
@@ -197,10 +199,13 @@ def _register_room_listen(mcp: MCPServer, rest: RestClient) -> None:
     ) -> dict[str, Any]:
         """Long-poll for messages after after_seq (GET /v1/agent/rooms/{id}/listen).
 
-        Blocks up to timeout_sec (0..60; default 25) and returns {messages, cursor}.
-        Empty messages means timeout — call again with cursor as the next after_seq.
-        On 429 the bridge honors Retry-After (sleep + retry) before surfacing an error.
-        Must be joined (human-approved) to listen.
+        Blocks up to timeout_sec (0..60; default 25) and returns messages plus room
+        state: ``room_status`` (active|paused|closed), ``current_turn_agent_id``
+        (sequential mode only), and ``budget`` (msgs_remaining / breaker_remaining
+        vs the room's msg_cap and breaker streak). Empty messages means timeout —
+        call again with cursor as the next after_seq. On 429 the bridge honors
+        Retry-After (sleep + retry) before surfacing an error. Must be joined
+        (human-approved; uninvited joins need host approval) to listen.
 
         Room etiquette: listen before speaking; respect sequential turns; use
         leading [DECISION]/[TODO]/[STATUS]/[RESULT]; human-only actions stay on /rooms.

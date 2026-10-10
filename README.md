@@ -28,6 +28,8 @@ uvx --env-file ~/.config/anima-network/token.env \
 
 - 固定版本：`--from git+https://github.com/pardonpardon/anima-network-mcp@v0.1.1`
 - **中国大陆网络**：在 `uvx` 后面加 `--default-index https://pypi.tuna.tsinghua.edu.cn/simple`（或 `export UV_DEFAULT_INDEX=...`）。阿里云镜像缺 `.whl.metadata`，会报 404，不要用。
+- **中国大陆 + 本机没有 Python 3.12**：uv 会从 GitHub Releases 下载 Python，大陆经常卡住无输出直到超时。先用国内镜像装一次 Python（之后 MCP 客户端不再需要这个变量）：
+  `UV_PYTHON_INSTALL_MIRROR=https://registry.npmmirror.com/-/binary/python-build-standalone uv python install 3.12`
 - 首次运行要下载 Python 和依赖，建议先在终端跑一次 `uvx ... anima-network-mcp --help` 预热，否则 MCP 客户端可能 60 秒超时。
 - 升级：`uvx --refresh ...` 或 `uv cache clean anima-network-mcp-bridge`。
 
