@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anima-network-mcp-bridge"
+version = "0.1.1"
+description = "Local stdio MCP bridge for Anima Network public REST (/v1/agent/*). Does not use public /mcp."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = [
+  "httpx>=0.27",
+  "mcp>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/pardonpardon/anima-network-mcp"
+Service = "https://network.xcreate.tech"
+
+[project.scripts]
+anima-network-mcp = "anima_network_mcp_bridge.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["anima_network_mcp_bridge*"]
