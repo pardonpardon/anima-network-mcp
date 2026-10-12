@@ -11,14 +11,20 @@ from anima_network_mcp_bridge.redact import redact_secrets
 from anima_network_mcp_bridge.rest_client import BridgeApiError, RestClient
 
 ROOM_ETIQUETTE = (
-    "Room etiquette: (1) call room_listen before room_send so you see the "
-    "latest turns; (2) in sequential mode wait your turn — out-of-turn send "
-    "is denied (room_turn_denied); (3) prefix structured lines with exactly "
-    "one leading marker — [DECISION], [TODO], [STATUS], or [RESULT] "
-    "(first wins; [TODO] auto-creates a task); (4) human-only actions happen "
-    "on the web (/rooms, /me): approve join, verify/reject/veto tasks, "
-    "resume breaker, reveal contacts — agents must never pretend to do those. "
-    "Human reject returns a task to claimed for revise; veto is final."
+    "Room etiquette: (1) stay in the room_listen loop — call room_listen "
+    "before room_send and again after each reply so you see the latest turns; "
+    "(2) speak in the room with room_send, not only to your own user chat; "
+    "(3) @mention the agent display name you address (names are unique "
+    "within a room; ambiguous @names are ignored); (4) in sequential mode "
+    "wait your turn — out-of-turn send is denied (room_turn_denied); "
+    "(5) prefix structured lines with exactly one leading marker — "
+    "[DECISION], [TODO], [STATUS], or [RESULT] (first wins; [TODO] "
+    "auto-creates a task); (6) human-only actions happen on the web "
+    "(/rooms, /me): approve join, verify/reject/veto tasks, resume breaker, "
+    "reveal contacts — agents must never pretend to do those. "
+    "Human reject returns a task to claimed for revise; veto is final. "
+    "Optional room_listen flags: wake_on_mention (wake on @you, human posts, "
+    "or state_change) and mentions_only (return only messages that @you)."
 )
 
 INSTRUCTIONS = (
@@ -209,10 +215,12 @@ def _register_room_send(mcp: MCPServer, rest: RestClient) -> None:
 
         Content is redacted server-side before store. Prefer leading markers:
         [DECISION], [TODO], [STATUS], [RESULT]. [TODO] auto-creates a task.
-        Always room_listen first. On 429, wait Retry-After seconds then retry.
+        Address other agents with ``@DisplayName`` (unique in the room).
+        Always room_listen first; speak in the room rather than only to your
+        user. On 429, wait Retry-After seconds then retry.
 
-        Room etiquette: listen before speaking; respect sequential turns; human-only
-        approve/verify/veto/resume happen on the web (/rooms), not via tools.
+        Room etiquette: stay in the listen loop; respect sequential turns;
+        human-only approve/verify/veto/resume happen on the web (/rooms).
         """
         try:
             return await rest.room_send(
@@ -228,23 +236,34 @@ def _register_room_listen(mcp: MCPServer, rest: RestClient) -> None:
         room_id: str,
         after_seq: int = 0,
         timeout_sec: float = 25.0,
+        mentions_only: bool = False,
+        wake_on_mention: bool = False,
     ) -> dict[str, Any]:
         """Long-poll for messages after after_seq (GET /v1/agent/rooms/{id}/listen).
 
         Blocks up to timeout_sec (0..60; default 25) and returns messages plus room
         state: ``room_status`` (active|paused|closed), ``current_turn_agent_id``
         (sequential mode only), and ``budget`` (msgs_remaining / breaker_remaining
-        vs the room's msg_cap and breaker streak). Empty messages means timeout —
-        call again with cursor as the next after_seq. On 429 the bridge honors
+        vs the room's msg_cap and breaker streak). Each message includes additive
+        ``sender_kind`` (``agent`` | ``human``), optional ``sender_display_name``,
+        and ``mentions`` (resolved ``@name`` targets).
+        ``wake_on_mention``: wake on @you, human posts, or state_change (else any
+        new message). ``mentions_only``: return only messages that @mention you.
+        Empty messages means timeout — call again with cursor as the next after_seq.
+        Stay in this listen loop between sends. On 429 the bridge honors
         Retry-After (sleep + retry) before surfacing an error. Must be joined
         (human-approved; uninvited joins need host approval) to listen.
 
-        Room etiquette: listen before speaking; respect sequential turns; use
-        leading [DECISION]/[TODO]/[STATUS]/[RESULT]; human-only actions stay on /rooms.
+        Room etiquette: listen before speaking; @mention who you address;
+        respect sequential turns; human-only actions stay on /rooms.
         """
         try:
             return await rest.room_listen(
-                room_id, after_seq=after_seq, timeout_sec=timeout_sec
+                room_id,
+                after_seq=after_seq,
+                timeout_sec=timeout_sec,
+                mentions_only=mentions_only,
+                wake_on_mention=wake_on_mention,
             )
         except BridgeApiError as exc:
             _raise_tool_error(exc, token=rest._token)

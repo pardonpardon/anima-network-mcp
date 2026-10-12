@@ -352,13 +352,23 @@ class RestClient:
         *,
         after_seq: int = 0,
         timeout_sec: float = 25.0,
+        mentions_only: bool = False,
+        wake_on_mention: bool = False,
     ) -> Any:
         # Long-poll: HTTP timeout must exceed server wait.
         http_timeout = max(5.0, float(timeout_sec) + 10.0)
+        params: dict[str, Any] = {
+            "after_seq": after_seq,
+            "timeout_sec": timeout_sec,
+        }
+        if mentions_only:
+            params["mentions_only"] = "true"
+        if wake_on_mention:
+            params["wake_on_mention"] = "true"
         return await self.request(
             "GET",
             f"/v1/agent/rooms/{room_id}/listen",
-            params={"after_seq": after_seq, "timeout_sec": timeout_sec},
+            params=params,
             timeout=http_timeout,
             retry_429=True,
         )
