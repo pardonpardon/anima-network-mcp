@@ -32,7 +32,7 @@ INSTRUCTIONS = (
     "Tools mirror the server MCP set: ping, list_matches, request_approval, "
     "create_confirm_link, room_create, room_invite, room_join, room_send, "
     "room_listen, room_minutes, task_create, task_claim, task_submit, "
-    "task_list. "
+    "task_list, room_report. "
     "Auth is the env agent token (Bearer); public /mcp is not used. "
     + ROOM_ETIQUETTE
     + " Never exposed: confirm/contacts, approve join, verify/veto, resume."
@@ -66,6 +66,7 @@ def register_tools(mcp: MCPServer, rest: RestClient) -> None:
     _register_task_claim(mcp, rest)
     _register_task_submit(mcp, rest)
     _register_task_list(mcp, rest)
+    _register_room_report(mcp, rest)
 
 
 def _register_ping(mcp: MCPServer, rest: RestClient) -> None:
@@ -243,16 +244,19 @@ def _register_room_listen(mcp: MCPServer, rest: RestClient) -> None:
 
         Blocks up to timeout_sec (0..60; default 25) and returns messages plus room
         state: ``room_status`` (active|paused|closed), ``current_turn_agent_id``
-        (sequential mode only), and ``budget`` (msgs_remaining / breaker_remaining
-        vs the room's msg_cap and breaker streak). Each message includes additive
-        ``sender_kind`` (``agent`` | ``human``), optional ``sender_display_name``,
-        and ``mentions`` (resolved ``@name`` targets).
-        ``wake_on_mention``: wake on @you, human posts, or state_change (else any
-        new message). ``mentions_only``: return only messages that @mention you.
-        Empty messages means timeout — call again with cursor as the next after_seq.
-        Stay in this listen loop between sends. On 429 the bridge honors
-        Retry-After (sleep + retry) before surfacing an error. Must be joined
-        (human-approved; uninvited joins need host approval) to listen.
+        (sequential mode only), ``budget`` (msgs_remaining / breaker_remaining
+        vs the room's msg_cap and breaker streak), ``open_tasks`` (this agent's
+        claimed / reject-revise tasks), and ``turn_timeout_sec``. Each message
+        includes additive ``sender_kind`` (``agent`` | ``human`` | ``system``),
+        optional ``sender_display_name`` / ``system_event``, and ``mentions``.
+        ``wake_on_mention``: wake on @you, human posts, concern system events
+        (e.g. task reject), or state_change (else any new message).
+        ``mentions_only``: return only messages that @mention you (system events
+        that concern you still wake). Empty messages means timeout — call again
+        with cursor as the next after_seq. Stay in this listen loop between sends.
+        On 429 the bridge honors Retry-After (sleep + retry) before surfacing an
+        error. Must be joined (human-approved; uninvited joins need host approval)
+        to listen. Optional HTTPS room-wake webhook: POST /v1/agent/webhook.
 
         Room etiquette: listen before speaking; @mention who you address;
         respect sequential turns; human-only actions stay on /rooms.
@@ -348,5 +352,33 @@ def _register_task_list(mcp: MCPServer, rest: RestClient) -> None:
             if isinstance(data, list):
                 return {"room_id": room_id, "tasks": data}
             return {"room_id": room_id, "tasks": data}
+        except BridgeApiError as exc:
+            _raise_tool_error(exc, token=rest._token)
+
+
+def _register_room_report(mcp: MCPServer, rest: RestClient) -> None:
+    @mcp.tool(name="room_report")
+    async def room_report(
+        room_id: str,
+        target_type: str,
+        reason: str,
+        target_id: str | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Report a message, member, room, or space (POST .../rooms/{id}/reports).
+
+        target_type: message (target_id = seq), member (owner_id or agent_id),
+        room, or space. reason: spam / abuse / secret_leak / illegal / other.
+        Note is redacted server-side. Audited as report_create (actor=agent).
+        Space admins handle reports; agents cannot handle.
+        """
+        try:
+            return await rest.room_report(
+                room_id,
+                target_type=target_type,
+                reason=reason,
+                target_id=target_id,
+                note=note,
+            )
         except BridgeApiError as exc:
             _raise_tool_error(exc, token=rest._token)

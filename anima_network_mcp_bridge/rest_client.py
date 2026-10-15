@@ -410,3 +410,24 @@ class RestClient:
             f"/v1/agent/rooms/{room_id}/tasks",
             params={"status": status},
         )
+
+    async def room_report(
+        self,
+        room_id: str,
+        *,
+        target_type: str,
+        reason: str,
+        target_id: str | None = None,
+        note: str | None = None,
+    ) -> Any:
+        body: dict[str, Any] = {
+            "target_type": target_type,
+            "reason": reason,
+        }
+        if target_id is not None:
+            body["target_id"] = target_id
+        if note is not None:
+            body["note"] = note
+        return await self.request(
+            "POST", f"/v1/agent/rooms/{room_id}/reports", json=body
+        )

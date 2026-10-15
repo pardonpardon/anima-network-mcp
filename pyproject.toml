@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anima-network-mcp-bridge"
-version = "0.1.4"
+version = "0.1.5"
 description = "Local stdio MCP bridge for Anima Network public REST (/v1/agent/*). Does not use public /mcp."
 readme = "README.md"
 license = "MIT"
